@@ -4,7 +4,7 @@ import sys
 import os
 import pygame
 
-# Importação com Fallback para funcionar tanto via terminal direto quanto via unittest
+# Importação com Fallback Seguro para rodar direto ou via unittest
 try:
     from src.levels import NIVEIS, obter_configuracao_nivel
 except ModuleNotFoundError:
@@ -250,21 +250,21 @@ def main():
     sound_mgr = SoundManager()
 
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    pygame.display.set_caption("Slime Dash - Level Manager Engine v2.2")
+    pygame.display.set_caption("Slime Dash - Multi-Level Progression Engine v2.3")
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("Consolas", 20, bold=True)
     title_font = pygame.font.SysFont("Consolas", 48, bold=True)
-
-    id_nivel_atual = 1
-    config_nivel = obter_configuracao_nivel(id_nivel_atual)
-    fase_texto = config_nivel["fase"]
-    bpm_atual = config_nivel["bpm"]
 
     floor_y = 580
     ceiling_y = 100
     scroll_speed = 6.0
     tile_size = 60
 
+    # Controle de Progressão de Nível
+    id_nivel_atual = 1
+    config_nivel = obter_configuracao_nivel(id_nivel_atual)
+    fase_texto = config_nivel["fase"]
+    bpm_atual = config_nivel["bpm"]
     largura_total_fase = len(fase_texto) * tile_size
 
     distancia_percorrida = 0.0
@@ -272,6 +272,7 @@ def main():
     moedas_coletadas = 0
     moedas_pegas_ids = set()
     vitoria = False
+    jogo_zerado = False
 
     frames_contador = 0
     frames_por_batida = int((60 * FPS) / bpm_atual)
@@ -280,6 +281,27 @@ def main():
     checkpoint = None
     slime = Slime(x=180, y=300)
     particles = []
+
+    def carregar_nivel(id_nivel: int):
+        nonlocal config_nivel, fase_texto, bpm_atual, largura_total_fase
+        nonlocal distancia_percorrida, moedas_coletadas, moedas_pegas_ids
+        nonlocal vitoria, checkpoint, frames_por_batida
+
+        config_nivel = obter_configuracao_nivel(id_nivel)
+        fase_texto = config_nivel["fase"]
+        bpm_atual = config_nivel["bpm"]
+        largura_total_fase = len(fase_texto) * tile_size
+        frames_por_batida = int((60 * FPS) / bpm_atual)
+
+        distancia_percorrida = 0.0
+        moedas_coletadas = 0
+        moedas_pegas_ids.clear()
+        checkpoint = None
+        vitoria = False
+
+        slime.mudar_modo("GOSMA")
+        slime.y = 300
+        slime.vel_y = 0
 
     def reset_game():
         nonlocal distancia_percorrida, tentativas, moedas_coletadas, vitoria
@@ -325,7 +347,14 @@ def main():
                     checkpoint = None
                 elif event.key == pygame.K_SPACE:
                     if vitoria:
-                        reset_game()
+                        if id_nivel_atual < len(NIVEIS):
+                            id_nivel_atual += 1
+                            carregar_nivel(id_nivel_atual)
+                        else:
+                            # Se concluiu a última fase, reinicia do nível 1
+                            id_nivel_atual = 1
+                            carregar_nivel(id_nivel_atual)
+                            jogo_zerado = False
                     else:
                         slime.solicitar_pulo()
 
@@ -442,6 +471,8 @@ def main():
 
             if fim_fase_x is not None and slime.x >= fim_fase_x:
                 vitoria = True
+                if id_nivel_atual == len(NIVEIS):
+                    jogo_zerado = True
 
         screen.fill(COLOR_BG)
 
@@ -537,19 +568,22 @@ def main():
             )
             screen.blit(txt_chk, (20, 110))
 
+        # Tela de Transição / Vitória de Nível
         if vitoria:
             s = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
             s.fill((0, 0, 0, 180))
             screen.blit(s, (0, 0))
 
-            txt_vic = title_font.render(
-                "FASE CONCLUÍDA!", True, config_nivel["cor_tema"]
+            titulo_txt = "JOGO ZERADO!" if jogo_zerado else "FASE CONCLUÍDA!"
+            sub_txt = (
+                "Pressione ESPAÇO para jogar novamente do Nível 1"
+                if jogo_zerado
+                else f"Moedas: {moedas_coletadas}/3  |  Pressione ESPAÇO para a Próxima Fase"
             )
-            txt_sub = font.render(
-                f"Moedas Secretas: {moedas_coletadas}/3  |  Pressione ESPAÇO para reiniciar",
-                True,
-                (255, 255, 255),
-            )
+
+            txt_vic = title_font.render(titulo_txt, True, config_nivel["cor_tema"])
+            txt_sub = font.render(sub_txt, True, (255, 255, 255))
+
             screen.blit(
                 txt_vic, (SCREEN_WIDTH // 2 - txt_vic.get_width() // 2, 280)
             )
