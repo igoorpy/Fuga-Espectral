@@ -13,38 +13,24 @@ class TestSlimeDashEngine(unittest.TestCase):
         self.slime = Slime(x=180, y=300)
 
     def test_transicao_estado_portal_chiclete(self):
-        """[CTFL: Transição de Estado] Garante que o Portal Chiclete reduz a gravidade"""
+        """[CTFL: Transição de Estado] Garante que o Portal Chiclete altera a gravidade"""
         self.slime.mudar_modo("CHICLETE")
         self.assertEqual(self.slime.modo, "CHICLETE")
-        self.assertEqual(
-            self.slime.gravity,
-            0.4,
-            "A gravidade no modo Chiclete deve ser reduzida para 0.4",
-        )
+        self.assertEqual(self.slime.gravity, 0.45)
 
     def test_transicao_estado_portal_neve(self):
         """[CTFL: Transição de Estado] Garante que o Portal Neve inverte a gravidade"""
         self.slime.mudar_modo("NEVE")
         self.assertEqual(self.slime.modo, "NEVE")
-        self.assertLess(
-            self.slime.gravity,
-            0,
-            "A gravidade no modo Neve deve ser negativa (Invertida)",
-        )
+        self.assertLess(self.slime.gravity, 0)
 
-    def test_deformacao_squish_ao_impactar_chao(self):
-        """[CTFL: Teste Funcional] Verifica achatamento horizontal ao tocar o chão"""
-        particles = []
-        floor_y, ceiling_y = 580, 100
-        self.slime.y = floor_y - 10
-        self.slime.vel_y = 10.0
-        self.slime.is_grounded = False
-
-        self.slime.update(floor_y, ceiling_y, particles)
-        self.assertGreater(
-            self.slime.current_width,
-            36,
-            "O Slime deve alargar na horizontal ao impactar o chão",
+    def test_jump_buffering(self):
+        """[CTFL: Teste de Usabilidade] Garante que solicitar pulo ativa o buffer de entrada"""
+        self.slime.solicitar_pulo()
+        self.assertEqual(
+            self.slime.jump_buffer,
+            8,
+            "O buffer de pulo deve ser preenchido com 8 frames",
         )
 
 

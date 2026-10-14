@@ -20,8 +20,6 @@ COLOR_EYES = (255, 255, 255)
 COLOR_PUPIL = (10, 10, 20)
 
 # --- REPRESENTAÇÃO DA FASE 1 EM TEXTO ---
-# ' ' = Vazio, '^' = Espinho, '1' = Bloco Baixo, '2' = Bloco Alto
-# 'C' = Portal Chiclete (Voo), 'N' = Portal Neve (Inversão), 'G' = Portal Gosma (Chão)
 FASE_NIVEL_1 = (
     "    ^   11   ^^   22   ^   C   ^   ^   N   ^^   G   111   ^^^   END"
 )
@@ -58,11 +56,14 @@ class Slime(pygame.sprite.Sprite):
         self.y = float(y)
         self.vel_y = 0.0
 
+        # Jump Buffer (Tolerância de entrada para pulos perfeitos)
+        self.jump_buffer = 0
+
         # Estado Elemental
         self.modo = "GOSMA"  # "GOSMA", "CHICLETE", "NEVE"
         self.color = COLOR_SLIME_GOSMA
-        self.gravity = 0.8
-        self.jump_strength = -14.0
+        self.gravity = 1.0  # Gravidade mais firme e rápida
+        self.jump_strength = -15.0  # Pulo responsivo
         self.is_grounded = False
 
         # Visual de Deformação
@@ -75,60 +76,93 @@ class Slime(pygame.sprite.Sprite):
         self.modo = novo_modo
         if novo_modo == "GOSMA":
             self.color = COLOR_SLIME_GOSMA
-            self.gravity = 0.8
-            self.jump_strength = -14.0
+            self.gravity = 1.0
+            self.jump_strength = -15.0
         elif novo_modo == "CHICLETE":
             self.color = COLOR_SLIME_CHICLETE
-            self.gravity = 0.4  # Voo mais suave estilo Flappy
-            self.jump_strength = -8.0
+            self.gravity = 0.45  # Voo suave estilo Flappy
+            self.jump_strength = -8.5
         elif novo_modo == "NEVE":
             self.color = COLOR_SLIME_NEVE
-            self.gravity = -0.8  # Inverte gravidade para o teto!
-            self.jump_strength = 14.0
+            self.gravity = -1.0  # Gravidade invertida para o teto
+            self.jump_strength = 15.0
 
-    def jump(self):
-        if self.modo == "GOSMA" and self.is_grounded:
-            self.vel_y = self.jump_strength
-            self.is_grounded = False
-            self.current_width, self.current_height = 24.0, 48.0
-        elif self.modo == "CHICLETE":
-            # Pulo contínuo no ar
-            self.vel_y = self.jump_strength
-            self.current_width, self.current_height = 28.0, 42.0
-        elif self.modo == "NEVE" and self.is_grounded:
-            self.vel_y = self.jump_strength  # Empurra para baixo
-            self.is_grounded = False
-            self.current_width, self.current_height = 24.0, 48.0
+    def solicitar_pulo(self):
+        """Ativa a intenção de pulo (Buffer de entrada)"""
+        self.jump_buffer = 8  # Tenta pular pelos próximos 8 frames (~0.13s)
 
-    def update(self, floor_y: int, ceiling_y: int, particles: list):
+    def tentar_pular(self):
+        """Executa o pulo se houver buffer ativo e o Slime estiver apto"""
+        if self.jump_buffer > 0:
+            if self.modo == "GOSMA" and self.is_grounded:
+                self.vel_y = self.jump_strength
+                self.is_grounded = False
+                self.jump_buffer = 0
+                self.current_width, self.current_height = 24.0, 48.0
+            elif self.modo == "CHICLETE":
+                self.vel_y = self.jump_strength
+                self.jump_buffer = 0
+                self.current_width, self.current_height = 28.0, 42.0
+            elif self.modo == "NEVE" and self.is_grounded:
+                self.vel_y = self.jump_strength  # Empurra para baixo (descola do teto)
+                self.is_grounded = False
+                self.jump_buffer = 0
+                self.current_width, self.current_height = 24.0, 48.0
+
+    def update(
+        self,
+        floor_y: int,
+        ceiling_y: int,
+        particles: list,
+        space_held: bool = False,
+    ):
+        # 1. Atualiza Buffer de Pulo
+        if self.jump_buffer > 0:
+            self.jump_buffer -= 1
+
+        if space_held:
+            self.jump_buffer = 4  # Mantém o buffer ativo se a tecla estiver segurada
+
+        # Tenta disparar o pulo
+        self.tentar_pular()
+
+        # 2. Aplica Gravidade
         self.vel_y += self.gravity
         self.y += self.vel_y
 
-        # Colisão com o Chão (Modos Normal e Chiclete)
-        if self.gravity > 0 and self.y + self.current_height / 2 >= floor_y:
-            if not self.is_grounded:
-                self.current_width, self.current_height = 46.0, 24.0
-                for _ in range(5):
-                    particles.append(Particle(self.x, floor_y - 5, self.color))
-            self.y = floor_y - self.current_height / 2
-            self.vel_y = 0
-            self.is_grounded = True
+        # 3. Colisão com o Chão (Gravidade Positiva)
+        if self.gravity > 0:
+            slime_bottom = self.y + self.current_height / 2
+            if slime_bottom >= floor_y:
+                if not self.is_grounded:
+                    self.current_width, self.current_height = 46.0, 24.0
+                    for _ in range(5):
+                        particles.append(
+                            Particle(self.x, floor_y - 5, self.color)
+                        )
+                self.y = floor_y - self.current_height / 2
+                self.vel_y = 0
+                self.is_grounded = True
+                self.tentar_pular()  # Pula instantaneamente se o buffer estiver ativo
 
-        # Colisão com o Teto (Modo Neve)
-        elif self.gravity < 0 and self.y - self.current_height / 2 <= ceiling_y:
-            if not self.is_grounded:
-                self.current_width, self.current_height = 46.0, 24.0
-                for _ in range(5):
-                    particles.append(
-                        Particle(self.x, ceiling_y + 5, self.color)
-                    )
-            self.y = ceiling_y + self.current_height / 2
-            self.vel_y = 0
-            self.is_grounded = True
+        # 4. Colisão com o Teto (Modo Neve / Gravidade Negativa)
+        elif self.gravity < 0:
+            slime_top = self.y - self.current_height / 2
+            if slime_top <= ceiling_y:
+                if not self.is_grounded:
+                    self.current_width, self.current_height = 46.0, 24.0
+                    for _ in range(5):
+                        particles.append(
+                            Particle(self.x, ceiling_y + 5, self.color)
+                        )
+                self.y = ceiling_y + self.current_height / 2
+                self.vel_y = 0
+                self.is_grounded = True
+                self.tentar_pular()
 
-        # Recuperação elástica
-        self.current_width += (self.base_size - self.current_width) * 0.15
-        self.current_height += (self.base_size - self.current_height) * 0.15
+        # 5. Recuperação Elástica
+        self.current_width += (self.base_size - self.current_width) * 0.2
+        self.current_height += (self.base_size - self.current_height) * 0.2
 
         self.rect = pygame.Rect(
             int(self.x - self.current_width / 2),
@@ -139,18 +173,25 @@ class Slime(pygame.sprite.Sprite):
 
     def draw(self, surface: pygame.Surface):
         pygame.draw.ellipse(surface, self.color, self.rect)
-        # Olhos
         eye_y = self.rect.centery - (2 if self.gravity > 0 else -2)
-        pygame.draw.circle(surface, COLOR_EYES, (self.rect.centerx - 4, eye_y), 4)
-        pygame.draw.circle(surface, COLOR_EYES, (self.rect.centerx + 4, eye_y), 4)
-        pygame.draw.circle(surface, COLOR_PUPIL, (self.rect.centerx - 4, eye_y), 2)
-        pygame.draw.circle(surface, COLOR_PUPIL, (self.rect.centerx + 4, eye_y), 2)
+        pygame.draw.circle(
+            surface, COLOR_EYES, (self.rect.centerx - 4, eye_y), 4
+        )
+        pygame.draw.circle(
+            surface, COLOR_EYES, (self.rect.centerx + 4, eye_y), 4
+        )
+        pygame.draw.circle(
+            surface, COLOR_PUPIL, (self.rect.centerx - 4, eye_y), 2
+        )
+        pygame.draw.circle(
+            surface, COLOR_PUPIL, (self.rect.centerx + 4, eye_y), 2
+        )
 
 
 def main():
     pygame.init()
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    pygame.display.set_caption("Slime Dash - Level Engine v0.3")
+    pygame.display.set_caption("Slime Dash - Smooth Jump Engine v0.4")
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("Consolas", 24, bold=True)
 
@@ -180,52 +221,46 @@ def main():
                 if event.key == pygame.K_ESCAPE:
                     running = False
                 elif event.key == pygame.K_SPACE:
-                    slime.jump()
+                    slime.solicitar_pulo()
+
+        keys = pygame.key.get_pressed()
+        space_held = keys[pygame.K_SPACE]
 
         # Atualizações
         distancia_percorrida += scroll_speed
-        slime.update(floor_y, ceiling_y, particles)
+        slime.update(floor_y, ceiling_y, particles, space_held)
 
         for p in particles[:]:
             p.update()
             if p.radius <= 0:
                 particles.remove(p)
 
-        # Rastreio de Objetos da Fase baseados na String
+        # Matriz da Fase
         espinhos_rects = []
         blocos_rects = []
         portais = []
 
-        # Converte a String da Fase em Rects dinâmicos na tela
         tile_size = 60
         for i, char in enumerate(FASE_NIVEL_1):
             obj_x = (i * tile_size) + 600 - distancia_percorrida
 
-            # Otimização: Só processa o que está perto da tela
             if -100 < obj_x < SCREEN_WIDTH + 100:
                 if char == "^":
-                    # Espinho (Triângulo/Hitbox)
                     spike_rect = pygame.Rect(
                         obj_x + 10, floor_y - 40, tile_size - 20, 40
                     )
                     espinhos_rects.append(spike_rect)
                 elif char in ("1", "2"):
-                    # Bloco de Plataforma
                     altura = 50 if char == "1" else 100
                     block_rect = pygame.Rect(
                         obj_x, floor_y - altura, tile_size, altura
                     )
                     blocos_rects.append(block_rect)
                 elif char in ("C", "N", "G"):
-                    # Portais Elementais
-                    portal_rect = pygame.Rect(
-                        obj_x, floor_y - 120, 30, 120
-                    )
+                    portal_rect = pygame.Rect(obj_x, floor_y - 120, 30, 120)
                     portais.append((portal_rect, char))
 
-        # --- CHECAGEM DE COLISÕES (QA / Regras de Negócio) ---
-
-        # 1. Colisão com Portais
+        # Colisões
         for portal_rect, tipo in portais:
             if slime.rect.colliderect(portal_rect):
                 if tipo == "C" and slime.modo != "CHICLETE":
@@ -235,22 +270,20 @@ def main():
                 elif tipo == "G" and slime.modo != "GOSMA":
                     slime.mudar_modo("GOSMA")
 
-        # 2. Colisão com Espinhos -> Morte Instantânea
         for spike in espinhos_rects:
             if slime.rect.colliderect(spike):
                 reset_game()
 
-        # 3. Colisão com Blocos -> Morte ou Plataforma
         for block in blocos_rects:
             if slime.rect.colliderect(block):
-                # Se bater de lado -> Morte
-                if slime.rect.right > block.left and slime.rect.left < block.left:
+                if (
+                    slime.rect.right > block.left
+                    and slime.rect.left < block.left
+                ):
                     reset_game()
 
         # Renderização
         screen.fill(COLOR_BG)
-
-        # Chão e Teto
         pygame.draw.rect(
             screen,
             COLOR_FLOOR,
@@ -258,12 +291,15 @@ def main():
         )
         pygame.draw.rect(screen, COLOR_FLOOR, (0, 0, SCREEN_WIDTH, ceiling_y))
 
-        # Desenha Objetos da Fase
         for spike in espinhos_rects:
             pygame.draw.polygon(
                 screen,
                 COLOR_SPIKE,
-                [spike.bottomleft, (spike.centerx, spike.top), spike.bottomright],
+                [
+                    spike.bottomleft,
+                    (spike.centerx, spike.top),
+                    spike.bottomright,
+                ],
             )
 
         for block in blocos_rects:
@@ -283,7 +319,7 @@ def main():
 
         slime.draw(screen)
 
-        # Interface de Usuário (UI)
+        # UI
         txt_tentativas = font.render(
             f"Tentativa: {tentativas}", True, (255, 255, 255)
         )
