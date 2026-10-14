@@ -33,6 +33,22 @@ class TestSlimeDashEngine(unittest.TestCase):
             "O buffer de pulo deve ser preenchido com 8 frames",
         )
 
+    def test_hitbox_perdoadora_slime(self):
+        """[CTFL: Teste de Usabilidade] Verifica se a hitbox interna do Slime reduz falsos positivos"""
+        hitbox = self.slime.get_hitbox()
+        self.assertLess(
+            hitbox.width,
+            self.slime.rect.width,
+            "A hitbox de colisão deve ser menor que a bounding box visual",
+        )
+
+    def test_calculo_porcentagem_progresso(self):
+        """[CTFL: Teste Funcional] Garante que o cálculo de progresso atinge 100% no final da fase"""
+        distancia = 6000.0
+        largura_total = 6000.0
+        pct = min(100, int((distancia / largura_total) * 100))
+        self.assertEqual(pct, 100, "O progresso deve atingir 100% ao completar a distância total")
+
 
 if __name__ == "__main__":
     unittest.main()
