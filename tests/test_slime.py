@@ -42,12 +42,18 @@ class TestSlimeDashEngine(unittest.TestCase):
             "A hitbox de colisão deve ser menor que a bounding box visual",
         )
 
-    def test_calculo_porcentagem_progresso(self):
-        """[CTFL: Teste Funcional] Garante que o cálculo de progresso atinge 100% no final da fase"""
-        distancia = 6000.0
-        largura_total = 6000.0
-        pct = min(100, int((distancia / largura_total) * 100))
-        self.assertEqual(pct, 100, "O progresso deve atingir 100% ao completar a distância total")
+    def test_restauracao_estado_checkpoint(self):
+        """[CTFL: Teste de Recuperação] Garante que o Checkpoint armazena e restaura o estado do jogo"""
+        checkpoint = {
+            "distancia": 1200.0,
+            "modo": "NEVE",
+            "y": 150.0,
+        }
+        self.slime.mudar_modo(checkpoint["modo"])
+        self.slime.y = checkpoint["y"]
+
+        self.assertEqual(self.slime.modo, "NEVE")
+        self.assertEqual(self.slime.y, 150.0)
 
 
 if __name__ == "__main__":

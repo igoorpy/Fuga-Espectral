@@ -17,12 +17,11 @@ COLOR_SLIME_NEVE = (135, 206, 250)
 COLOR_SPIKE = (230, 50, 50)
 COLOR_BLOCK = (80, 70, 110)
 COLOR_COIN = (255, 215, 0)
+COLOR_CHECKPOINT = (50, 255, 150)
 COLOR_EYES = (255, 255, 255)
 COLOR_PUPIL = (10, 10, 20)
 
 # --- REPRESENTAÇÃO DA FASE 1 EM TEXTO ---
-# ' ' = Vazio, '^' = Espinho, '1' = Bloco Baixo, '2' = Bloco Alto, 'O' = Moeda Secreta
-# 'C' = Portal Chiclete, 'N' = Portal Neve, 'G' = Portal Gosma, 'END' = Fim da Fase
 FASE_NIVEL_1 = (
     "    ^   11   O   ^^   22   ^   C   ^   O   ^   N   ^^   G   111   O   ^^^   END"
 )
@@ -188,9 +187,9 @@ class Slime(pygame.sprite.Sprite):
 def main():
     pygame.init()
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    pygame.display.set_caption("Slime Dash - Progress & Collectibles v0.7")
+    pygame.display.set_caption("Slime Dash - Complete Core Engine v1.0")
     clock = pygame.time.Clock()
-    font = pygame.font.SysFont("Consolas", 24, bold=True)
+    font = pygame.font.SysFont("Consolas", 20, bold=True)
     title_font = pygame.font.SysFont("Consolas", 48, bold=True)
 
     floor_y = 580
@@ -198,7 +197,6 @@ def main():
     scroll_speed = 6.0
     tile_size = 60
 
-    # Cálculo da distância total para porcentagem
     largura_total_fase = len(FASE_NIVEL_1) * tile_size
 
     distancia_percorrida = 0.0
@@ -207,19 +205,31 @@ def main():
     moedas_pegas_ids = set()
     vitoria = False
 
+    # Estado de Checkpoint / Modo Treino
+    checkpoint = None  # Formato: (distancia, modo_slime, y_slime)
+
     slime = Slime(x=180, y=300)
     particles = []
 
     def reset_game():
-        nonlocal distancia_percorrida, tentativas, moedas_coletadas, moedas_pegas_ids, vitoria
-        distancia_percorrida = 0.0
+        nonlocal distancia_percorrida, tentativas, moedas_coletadas, vitoria
         tentativas += 1
-        moedas_coletadas = 0
-        moedas_pegas_ids.clear()
         vitoria = False
-        slime.mudar_modo("GOSMA")
-        slime.y = 300
-        slime.vel_y = 0
+
+        if checkpoint is not None:
+            # Restaura do Checkpoint (Modo Treino)
+            distancia_percorrida = checkpoint["distancia"]
+            slime.mudar_modo(checkpoint["modo"])
+            slime.y = checkpoint["y"]
+            slime.vel_y = 0
+        else:
+            # Reinício Completo do 0%
+            distancia_percorrida = 0.0
+            moedas_coletadas = 0
+            moedas_pegas_ids.clear()
+            slime.mudar_modo("GOSMA")
+            slime.y = 300
+            slime.vel_y = 0
 
     running = True
     while running:
@@ -229,6 +239,22 @@ def main():
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
+                elif event.key == pygame.K_r:
+                    reset_game()  # Atalho de QA para resetar
+                elif event.key == pygame.K_z:
+                    # Salva Checkpoint (Modo Treino)
+                    checkpoint = {
+                        "distancia": distancia_percorrida,
+                        "modo": slime.modo,
+                        "y": slime.y,
+                    }
+                    for _ in range(10):
+                        particles.append(
+                            Particle(slime.x, slime.y, COLOR_CHECKPOINT)
+                        )
+                elif event.key == pygame.K_x:
+                    # Remove Checkpoint
+                    checkpoint = None
                 elif event.key == pygame.K_SPACE:
                     if vitoria:
                         reset_game()
@@ -238,7 +264,7 @@ def main():
         keys = pygame.key.get_pressed()
         space_held = keys[pygame.K_SPACE]
 
-        # Atualização do Loop Principal
+        # Loop Principal
         if not vitoria:
             distancia_percorrida += scroll_speed
             slime.update(floor_y, ceiling_y, particles, space_held)
@@ -258,7 +284,7 @@ def main():
         for i, char in enumerate(FASE_NIVEL_1):
             obj_x = (i * tile_size) + 600 - distancia_percorrida
 
-            if char == "E":  # Checa marcador END
+            if char == "E":
                 fim_fase_x = obj_x
 
             if -100 < obj_x < SCREEN_WIDTH + 100:
@@ -282,9 +308,8 @@ def main():
 
         slime_hb = slime.get_hitbox()
 
-        # --- REGRAS DE NEGÓCIO E COLISÕES ---
+        # Regras de Colisão e Lógica
         if not vitoria:
-            # 1. Portais
             for portal_rect, tipo in portais:
                 if slime_hb.colliderect(portal_rect):
                     if tipo == "C" and slime.modo != "CHICLETE":
@@ -294,7 +319,6 @@ def main():
                     elif tipo == "G" and slime.modo != "GOSMA":
                         slime.mudar_modo("GOSMA")
 
-            # 2. Coleta de Moedas
             for coin_rect, coin_id in moedas:
                 if slime_hb.colliderect(coin_rect):
                     moedas_pegas_ids.add(coin_id)
@@ -308,13 +332,11 @@ def main():
                             )
                         )
 
-            # 3. Espinhos -> Morte
             for spike in espinhos_rects:
                 spike_hb = spike.inflate(-18, -14).move(0, 6)
                 if slime_hb.colliderect(spike_hb):
                     reset_game()
 
-            # 4. Blocos -> Pouso vs Morte
             for block in blocos_rects:
                 if slime_hb.colliderect(block):
                     pes_do_slime = slime.rect.bottom
@@ -343,7 +365,6 @@ def main():
                     else:
                         reset_game()
 
-            # 5. Condição de Vitória (Passou da linha de chegada END)
             if fim_fase_x is not None and slime.x >= fim_fase_x:
                 vitoria = True
 
@@ -356,7 +377,6 @@ def main():
         )
         pygame.draw.rect(screen, COLOR_FLOOR, (0, 0, SCREEN_WIDTH, ceiling_y))
 
-        # Desenha Objetos
         for spike in espinhos_rects:
             pygame.draw.polygon(
                 screen,
@@ -389,14 +409,13 @@ def main():
 
         slime.draw(screen)
 
-        # UI e Barra de Progresso (0% a 100%)
+        # UI
         porcentagem = min(
             100, int((distancia_percorrida / largura_total_fase) * 100)
         )
         if vitoria:
             porcentagem = 100
 
-        # Barra Visual no Topo
         bar_width = 400
         bar_height = 16
         bar_x = (SCREEN_WIDTH - bar_width) // 2
@@ -418,7 +437,7 @@ def main():
         txt_pct = font.render(f"{porcentagem}%", True, (255, 255, 255))
         screen.blit(txt_pct, (bar_x + bar_width + 15, bar_y - 2))
 
-        # Indicadores de Tentativa e Moedas
+        # Indicadores Laterais
         txt_tentativas = font.render(
             f"Tentativa: {tentativas}", True, (255, 255, 255)
         )
@@ -428,10 +447,19 @@ def main():
         screen.blit(txt_tentativas, (20, 50))
         screen.blit(txt_moedas, (20, 80))
 
+        # Painel do Modo Treino / Checkpoint (UI)
+        if checkpoint is not None:
+            txt_chk = font.render(
+                "[Z] Checkpoint Ativo | [X] Remover Checkpoint",
+                True,
+                COLOR_CHECKPOINT,
+            )
+            screen.blit(txt_chk, (20, 110))
+
         # Tela de Vitória
         if vitoria:
             s = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-            s.fill((0, 0, 0, 180))  # Overlay escuro semi-transparente
+            s.fill((0, 0, 0, 180))
             screen.blit(s, (0, 0))
 
             txt_vic = title_font.render(
