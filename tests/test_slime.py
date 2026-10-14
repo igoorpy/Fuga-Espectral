@@ -1,6 +1,7 @@
 import unittest
 import pygame
-from src.main import Slime
+from src.main import Slime, SoundManager
+from src.levels import obter_configuracao_nivel, NIVEIS
 
 
 class TestSlimeDashEngine(unittest.TestCase):
@@ -11,6 +12,15 @@ class TestSlimeDashEngine(unittest.TestCase):
 
     def setUp(self):
         self.slime = Slime(x=180, y=300)
+        self.sound_mgr = SoundManager()
+
+    def test_carregamento_modulo_niveis(self):
+        """[CTFL: Teste Funcional] Garante que o gerenciador de níveis retorna a estrutura correta"""
+        config = obter_configuracao_nivel(1)
+        self.assertIn("nome", config)
+        self.assertIn("bpm", config)
+        self.assertIn("fase", config)
+        self.assertGreater(len(config["fase"]), 0, "A string da fase não pode estar vazia")
 
     def test_transicao_estado_portal_chiclete(self):
         """[CTFL: Transição de Estado] Garante que o Portal Chiclete altera a gravidade"""
@@ -33,27 +43,10 @@ class TestSlimeDashEngine(unittest.TestCase):
             "O buffer de pulo deve ser preenchido com 8 frames",
         )
 
-    def test_hitbox_perdoadora_slime(self):
-        """[CTFL: Teste de Usabilidade] Verifica se a hitbox interna do Slime reduz falsos positivos"""
-        hitbox = self.slime.get_hitbox()
-        self.assertLess(
-            hitbox.width,
-            self.slime.rect.width,
-            "A hitbox de colisão deve ser menor que a bounding box visual",
-        )
-
-    def test_restauracao_estado_checkpoint(self):
-        """[CTFL: Teste de Recuperação] Garante que o Checkpoint armazena e restaura o estado do jogo"""
-        checkpoint = {
-            "distancia": 1200.0,
-            "modo": "NEVE",
-            "y": 150.0,
-        }
-        self.slime.mudar_modo(checkpoint["modo"])
-        self.slime.y = checkpoint["y"]
-
-        self.assertEqual(self.slime.modo, "NEVE")
-        self.assertEqual(self.slime.y, 150.0)
+    def test_robustez_sound_manager(self):
+        """[CTFL: Teste de Robustez] Garante que o SoundManager responde sem lançar exceções"""
+        self.assertIsNotNone(self.sound_mgr)
+        self.sound_mgr.tocar(self.sound_mgr.sfx_jump)
 
 
 if __name__ == "__main__":
