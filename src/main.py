@@ -4,18 +4,26 @@ import sys
 import os
 import pygame
 
-# Importação com Fallback Seguro para rodar direto ou via unittest
 try:
-    from src.levels import NIVEIS, obter_configuracao_nivel
+    from src.levels import NIVEIS, obter_configuracao_nivel, DURACAO_MUSICA_SEGUNDOS
 except ModuleNotFoundError:
-    from levels import NIVEIS, obter_configuracao_nivel
+    from levels import NIVEIS, obter_configuracao_nivel, DURACAO_MUSICA_SEGUNDOS
 
-# --- CONFIGURAÇÕES GLOBAIS ---
-SCREEN_WIDTH = 1280
+# --- CONFIGURAÇÕES DE JANELA E CÂMERA (ESTILO GEOMETRY DASH 4:3) ---
+SCREEN_WIDTH = 960
 SCREEN_HEIGHT = 720
 FPS = 60
 
-# Cores Base
+TILE_SIZE = 60
+NUM_ROWS = 8
+FLOOR_Y = 560
+CEILING_Y = FLOOR_Y - (NUM_ROWS * TILE_SIZE)
+
+# Posição X de travamento do jogador na tela (~25%)
+TARGET_X = 240.0
+SLIME_START_X = -80.0  # Fora da janela visível à esquerda
+
+# Cores
 COLOR_BG = (15, 12, 25)
 COLOR_FLOOR = (40, 30, 60)
 COLOR_SLIME_GOSMA = (50, 240, 100)
@@ -23,6 +31,9 @@ COLOR_SLIME_CHICLETE = (255, 105, 180)
 COLOR_SLIME_NEVE = (135, 206, 250)
 COLOR_SPIKE = (230, 50, 50)
 COLOR_BLOCK = (80, 70, 110)
+COLOR_LAVA = (255, 80, 0)
+COLOR_PAD = (255, 230, 0)
+COLOR_RING = (255, 200, 0)
 COLOR_COIN = (255, 215, 0)
 COLOR_CHECKPOINT = (50, 255, 150)
 COLOR_EYES = (255, 255, 255)
@@ -41,8 +52,9 @@ class SoundManager:
         self.sfx_jump = self._gerar_som_sintetico(frequencia=520, duracao_ms=60)
         self.sfx_coin = self._gerar_som_sintetico(frequencia=980, duracao_ms=100)
         self.sfx_death = self._gerar_som_sintetico(frequencia=130, duracao_ms=180)
+        self.sfx_pad = self._gerar_som_sintetico(frequencia=750, duracao_ms=120)
 
-        self.carregar_e_tocar_musica("assets/fase1.mp3")
+        self.carregar_e_tocar_musica("assets/sounds/fase1.mp3")
 
     def _gerar_som_sintetico(self, frequencia: int, duracao_ms: int):
         if not self.sounds_enabled:
@@ -63,7 +75,7 @@ class SoundManager:
         if self.sounds_enabled and os.path.exists(caminho_musica):
             try:
                 pygame.mixer.music.load(caminho_musica)
-                pygame.mixer.music.set_volume(0.6)
+                pygame.mixer.music.set_volume(0.5)
                 pygame.mixer.music.play(-1)
             except Exception:
                 pass
@@ -90,7 +102,7 @@ class Particle:
         self.x = x
         self.y = y
         self.color = color
-        self.radius = random.randint(3, 6)
+        self.radius = random.randint(4, 7)
         self.vel_x = random.uniform(-2, -0.5)
         self.vel_y = random.uniform(-1.5, 1.5)
 
@@ -108,9 +120,9 @@ class Particle:
 
 class Slime(pygame.sprite.Sprite):
 
-    def __init__(self, x: int, y: int):
+    def __init__(self, x: float, y: float):
         super().__init__()
-        self.base_size = 36
+        self.base_size = 50
         self.x = float(x)
         self.y = float(y)
         self.vel_y = 0.0
@@ -118,13 +130,23 @@ class Slime(pygame.sprite.Sprite):
         self.jump_buffer = 0
         self.modo = "GOSMA"
         self.color = COLOR_SLIME_GOSMA
-        self.gravity = 1.0
-        self.jump_strength = -15.0
+        self.gravity = 1.10
+        self.jump_strength = -16.0
         self.is_grounded = False
 
         self.current_width = float(self.base_size)
         self.current_height = float(self.base_size)
-        self.rect = pygame.Rect(x, y, self.base_size, self.base_size)
+
+        self.update_rect()
+
+    def update_rect(self):
+        """Atualiza a caixa de renderização e colisão do Pygame."""
+        self.rect = pygame.Rect(
+            int(self.x - self.current_width / 2.0),
+            int(self.y - self.current_height),
+            int(self.current_width),
+            int(self.current_height),
+        )
 
     def get_hitbox(self) -> pygame.Rect:
         return self.rect.inflate(-10, -6)
@@ -133,16 +155,16 @@ class Slime(pygame.sprite.Sprite):
         self.modo = novo_modo
         if novo_modo == "GOSMA":
             self.color = COLOR_SLIME_GOSMA
-            self.gravity = 1.0
-            self.jump_strength = -15.0
+            self.gravity = 1.10
+            self.jump_strength = -16.0
         elif novo_modo == "CHICLETE":
             self.color = COLOR_SLIME_CHICLETE
-            self.gravity = 0.45
+            self.gravity = 0.42
             self.jump_strength = -8.5
         elif novo_modo == "NEVE":
             self.color = COLOR_SLIME_NEVE
-            self.gravity = -1.0
-            self.jump_strength = 15.0
+            self.gravity = -1.10
+            self.jump_strength = 16.0
 
     def solicitar_pulo(self):
         self.jump_buffer = 8
@@ -154,18 +176,18 @@ class Slime(pygame.sprite.Sprite):
                 self.vel_y = self.jump_strength
                 self.is_grounded = False
                 self.jump_buffer = 0
-                self.current_width, self.current_height = 24.0, 48.0
+                self.current_width, self.current_height = 32.0, 64.0
                 poulou = True
             elif self.modo == "CHICLETE":
                 self.vel_y = self.jump_strength
                 self.jump_buffer = 0
-                self.current_width, self.current_height = 28.0, 42.0
+                self.current_width, self.current_height = 38.0, 56.0
                 poulou = True
             elif self.modo == "NEVE" and self.is_grounded:
                 self.vel_y = self.jump_strength
                 self.is_grounded = False
                 self.jump_buffer = 0
-                self.current_width, self.current_height = 24.0, 48.0
+                self.current_width, self.current_height = 32.0, 64.0
                 poulou = True
 
             if poulou and sound_mgr is not None:
@@ -183,66 +205,46 @@ class Slime(pygame.sprite.Sprite):
             self.jump_buffer -= 1
 
         if space_held:
-            self.jump_buffer = 4
+            self.jump_buffer = 6
 
         self.tentar_pular(sound_mgr)
 
-        self.vel_y += self.gravity
-        self.y += self.vel_y
+        if not self.is_grounded or self.modo == "CHICLETE":
+            self.vel_y += self.gravity
+            self.y += self.vel_y
 
-        if self.gravity > 0:
-            slime_bottom = self.y + self.current_height / 2
-            if slime_bottom >= floor_y:
-                if not self.is_grounded:
-                    self.current_width, self.current_height = 46.0, 24.0
-                    for _ in range(5):
-                        particles.append(
-                            Particle(self.x, floor_y - 5, self.color)
-                        )
-                self.y = floor_y - self.current_height / 2
-                self.vel_y = 0
+        if self.gravity > 0 and not self.is_grounded:
+            if self.y >= floor_y:
+                self.y = float(floor_y)
+                self.vel_y = 0.0
                 self.is_grounded = True
+                self.current_width, self.current_height = 60.0, 32.0
+                for _ in range(5):
+                    particles.append(Particle(self.x, floor_y - 4, self.color))
                 self.tentar_pular(sound_mgr)
 
-        elif self.gravity < 0:
-            slime_top = self.y - self.current_height / 2
-            if slime_top <= ceiling_y:
-                if not self.is_grounded:
-                    self.current_width, self.current_height = 46.0, 24.0
-                    for _ in range(5):
-                        particles.append(
-                            Particle(self.x, ceiling_y + 5, self.color)
-                        )
-                self.y = ceiling_y + self.current_height / 2
-                self.vel_y = 0
+        elif self.gravity < 0 and not self.is_grounded:
+            if self.y <= ceiling_y:
+                self.y = float(ceiling_y)
+                self.vel_y = 0.0
                 self.is_grounded = True
+                self.current_width, self.current_height = 60.0, 32.0
+                for _ in range(5):
+                    particles.append(Particle(self.x, ceiling_y + 4, self.color))
                 self.tentar_pular(sound_mgr)
 
         self.current_width += (self.base_size - self.current_width) * 0.2
         self.current_height += (self.base_size - self.current_height) * 0.2
 
-        self.rect = pygame.Rect(
-            int(self.x - self.current_width / 2),
-            int(self.y - self.current_height / 2),
-            int(self.current_width),
-            int(self.current_height),
-        )
+        self.update_rect()
 
     def draw(self, surface: pygame.Surface):
         pygame.draw.ellipse(surface, self.color, self.rect)
-        eye_y = self.rect.centery - (2 if self.gravity > 0 else -2)
-        pygame.draw.circle(
-            surface, COLOR_EYES, (self.rect.centerx - 4, eye_y), 4
-        )
-        pygame.draw.circle(
-            surface, COLOR_EYES, (self.rect.centerx + 4, eye_y), 4
-        )
-        pygame.draw.circle(
-            surface, COLOR_PUPIL, (self.rect.centerx - 4, eye_y), 2
-        )
-        pygame.draw.circle(
-            surface, COLOR_PUPIL, (self.rect.centerx + 4, eye_y), 2
-        )
+        eye_y = self.rect.centery - (3 if self.gravity > 0 else -3)
+        pygame.draw.circle(surface, COLOR_EYES, (self.rect.centerx - 5, eye_y), 5)
+        pygame.draw.circle(surface, COLOR_EYES, (self.rect.centerx + 5, eye_y), 5)
+        pygame.draw.circle(surface, COLOR_PUPIL, (self.rect.centerx - 5, eye_y), 2)
+        pygame.draw.circle(surface, COLOR_PUPIL, (self.rect.centerx + 5, eye_y), 2)
 
 
 def main():
@@ -250,61 +252,84 @@ def main():
     sound_mgr = SoundManager()
 
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    pygame.display.set_caption("Slime Dash - Multi-Level Progression Engine v2.3")
+    pygame.display.set_caption("Slime Dash - Synchronized GD Engine")
     clock = pygame.time.Clock()
-    font = pygame.font.SysFont("Consolas", 20, bold=True)
-    title_font = pygame.font.SysFont("Consolas", 48, bold=True)
 
-    floor_y = 580
-    ceiling_y = 100
+    font = pygame.font.SysFont("Consolas", 18, bold=True)
+    attempt_font = pygame.font.SysFont("Consolas", 58, bold=True)
+    title_font = pygame.font.SysFont("Consolas", 42, bold=True)
+
     scroll_speed = 6.0
-    tile_size = 60
+    distancia_total_musica = scroll_speed * FPS * DURACAO_MUSICA_SEGUNDOS
 
-    # Controle de Progressão de Nível
     id_nivel_atual = 1
     config_nivel = obter_configuracao_nivel(id_nivel_atual)
-    fase_texto = config_nivel["fase"]
+    fase_matriz = config_nivel["fase"]
     bpm_atual = config_nivel["bpm"]
-    largura_total_fase = len(fase_texto) * tile_size
+
+    mapa_objetos = []
+    fim_fase_x_relativo = distancia_total_musica
+
+    def pre_carregar_mapa():
+        nonlocal fim_fase_x_relativo, mapa_objetos
+        mapa_objetos.clear()
+        fim_fase_x_relativo = distancia_total_musica
+
+        for row_idx, line in enumerate(fase_matriz):
+            y_pos = FLOOR_Y - ((row_idx + 1) * TILE_SIZE)
+            for col_idx, char in enumerate(line):
+                rel_x = col_idx * TILE_SIZE
+                if char == "E":
+                    fim_fase_x_relativo = rel_x
+                elif char in ("^", "v", "1", "h", "~", "*", "@", "O", "C", "N", "G"):
+                    mapa_objetos.append((rel_x, y_pos, char, col_idx))
+
+    pre_carregar_mapa()
 
     distancia_percorrida = 0.0
     tentativas = 1
     moedas_coletadas = 0
     moedas_pegas_ids = set()
     vitoria = False
-    jogo_zerado = False
 
-    frames_contador = 0
-    frames_por_batida = int((60 * FPS) / bpm_atual)
-    beat_pulse = 0.0
+    estado_jogo = "MENU"
+    timer_intro_wait = 0
 
-    checkpoint = None
-    slime = Slime(x=180, y=300)
+    slime = Slime(x=SLIME_START_X, y=FLOOR_Y)
     particles = []
 
-    def carregar_nivel(id_nivel: int):
-        nonlocal config_nivel, fase_texto, bpm_atual, largura_total_fase
-        nonlocal distancia_percorrida, moedas_coletadas, moedas_pegas_ids
-        nonlocal vitoria, checkpoint, frames_por_batida
+    def iniciar_fase():
+        nonlocal estado_jogo, timer_intro_wait, distancia_percorrida
+        estado_jogo = "INTRO_WAIT"
+        timer_intro_wait = 0
+        distancia_percorrida = 0.0
 
+        slime.mudar_modo("GOSMA")
+        slime.x = SLIME_START_X  # Reseta para -80px (Fora da tela à esquerda)
+        slime.y = FLOOR_Y
+        slime.vel_y = 0
+        slime.update_rect()      # Atualiza a posição inicial do rect!
+
+    def carregar_nivel(id_nivel: int):
+        nonlocal config_nivel, fase_matriz, bpm_atual, moedas_coletadas, moedas_pegas_ids
+        nonlocal vitoria, checkpoint, frames_por_batida, id_nivel_atual
+
+        id_nivel_atual = id_nivel
         config_nivel = obter_configuracao_nivel(id_nivel)
-        fase_texto = config_nivel["fase"]
+        fase_matriz = config_nivel["fase"]
         bpm_atual = config_nivel["bpm"]
-        largura_total_fase = len(fase_texto) * tile_size
         frames_por_batida = int((60 * FPS) / bpm_atual)
 
-        distancia_percorrida = 0.0
+        pre_carregar_mapa()
         moedas_coletadas = 0
         moedas_pegas_ids.clear()
         checkpoint = None
         vitoria = False
 
-        slime.mudar_modo("GOSMA")
-        slime.y = 300
-        slime.vel_y = 0
+        iniciar_fase()
 
     def reset_game():
-        nonlocal distancia_percorrida, tentativas, moedas_coletadas, vitoria
+        nonlocal tentativas, moedas_coletadas, vitoria, distancia_percorrida, estado_jogo
         tentativas += 1
         vitoria = False
         sound_mgr.tocar(sound_mgr.sfx_death)
@@ -313,49 +338,50 @@ def main():
         if checkpoint is not None:
             distancia_percorrida = checkpoint["distancia"]
             slime.mudar_modo(checkpoint["modo"])
+            slime.x = TARGET_X
             slime.y = checkpoint["y"]
             slime.vel_y = 0
+            slime.update_rect()
+            estado_jogo = "JOGANDO"
         else:
-            distancia_percorrida = 0.0
-            moedas_coletadas = 0
-            moedas_pegas_ids.clear()
-            slime.mudar_modo("GOSMA")
-            slime.y = 300
-            slime.vel_y = 0
+            iniciar_fase()
+
+    checkpoint = None
+    frames_contador = 0
+    frames_por_batida = int((60 * FPS) / bpm_atual)
+    beat_pulse = 0.0
 
     running = True
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    running = False
+                if event.key in (pygame.K_ESCAPE, pygame.K_p):
+                    if estado_jogo in ("JOGANDO", "INTRO_WAIT", "INTRO_RUN"):
+                        estado_jogo = "PAUSADO"
+                    elif estado_jogo == "PAUSADO":
+                        estado_jogo = "JOGANDO"
+
                 elif event.key == pygame.K_r:
-                    reset_game()
-                elif event.key == pygame.K_z:
-                    checkpoint = {
-                        "distancia": distancia_percorrida,
-                        "modo": slime.modo,
-                        "y": slime.y,
-                    }
-                    for _ in range(10):
-                        particles.append(
-                            Particle(slime.x, slime.y, COLOR_CHECKPOINT)
-                        )
-                elif event.key == pygame.K_x:
-                    checkpoint = None
+                    if estado_jogo != "MENU":
+                        reset_game()
+
+                elif event.key == pygame.K_m:
+                    estado_jogo = "MENU"
+
                 elif event.key == pygame.K_SPACE:
-                    if vitoria:
+                    if estado_jogo == "MENU":
+                        iniciar_fase()
+                    elif estado_jogo == "PAUSADO":
+                        estado_jogo = "JOGANDO"
+                    elif vitoria:
                         if id_nivel_atual < len(NIVEIS):
-                            id_nivel_atual += 1
-                            carregar_nivel(id_nivel_atual)
+                            carregar_nivel(id_nivel_atual + 1)
                         else:
-                            # Se concluiu a última fase, reinicia do nível 1
-                            id_nivel_atual = 1
-                            carregar_nivel(id_nivel_atual)
-                            jogo_zerado = False
-                    else:
+                            carregar_nivel(1)
+                    elif estado_jogo == "JOGANDO":
                         slime.solicitar_pulo()
 
         keys = pygame.key.get_pressed()
@@ -367,52 +393,95 @@ def main():
         else:
             beat_pulse = max(0.0, beat_pulse - 0.1)
 
-        if not vitoria:
+        # -------------------------------------------------------------
+        # MAQUINA DE ESTADOS DO JOGO (COM UPDATE_RECT CORRIGIDO)
+        # -------------------------------------------------------------
+        attempt_text_x = float(SCREEN_WIDTH // 2)
+
+        if estado_jogo == "INTRO_WAIT":
+            # FRAME 1: TENTATIVA X no centro, Slime fora da janela (-80px)
+            distancia_percorrida = 0.0
+            slime.x = SLIME_START_X
+            slime.update_rect()
+            attempt_text_x = float(SCREEN_WIDTH // 2)
+
+            timer_intro_wait += 1
+            if timer_intro_wait >= 30:  # 0.5s exibindo a tentativa
+                estado_jogo = "INTRO_RUN"
+
+        elif estado_jogo == "INTRO_RUN":
+            # FRAMES 2 e 3: Slime corre da borda esquerda (-80px -> 240px)
+            distancia_percorrida = 0.0
+            slime.x += 4.5
+            slime.y = FLOOR_Y
+            slime.is_grounded = True
+            slime.update_rect()  # FIX CRÍTICO: Atualiza a caixa de desenho do Slime!
+
+            attempt_text_x = float(SCREEN_WIDTH // 2)
+
+            if slime.x >= TARGET_X:
+                slime.x = TARGET_X
+                slime.update_rect()
+                estado_jogo = "JOGANDO"
+
+        elif estado_jogo == "JOGANDO" and not vitoria:
+            # FRAMES 4 e 5: Mapa rola e TENTATIVA X desliza para a esquerda
             distancia_percorrida += scroll_speed
-            slime.update(
-                floor_y, ceiling_y, particles, space_held, sound_mgr
-            )
+            slime.update(FLOOR_Y, CEILING_Y, particles, space_held, sound_mgr)
+            attempt_text_x = (SCREEN_WIDTH // 2) - distancia_percorrida
 
         for p in particles[:]:
             p.update()
             if p.radius <= 0:
                 particles.remove(p)
 
-        # Matriz da Fase
-        espinhos_rects = []
+        # Montagem dos Objetos Visíveis
+        espinhos_chao_rects = []
+        espinhos_teto_rects = []
+        lavas_rects = []
         blocos_rects = []
+        trampolins_rects = []
+        orbes_rects = []
         portais = []
         moedas = []
-        fim_fase_x = None
 
-        for i, char in enumerate(fase_texto):
-            obj_x = (i * tile_size) + 600 - distancia_percorrida
+        fim_fase_x = fim_fase_x_relativo + TARGET_X - distancia_percorrida
 
-            if char == "E":
-                fim_fase_x = obj_x
+        for rel_x, y_pos, char, tile_id in mapa_objetos:
+            obj_x = rel_x + TARGET_X - distancia_percorrida
 
             if -100 < obj_x < SCREEN_WIDTH + 100:
                 if char == "^":
-                    spike_rect = pygame.Rect(
-                        obj_x + 10, floor_y - 40, tile_size - 20, 40
-                    )
-                    espinhos_rects.append(spike_rect)
-                elif char in ("1", "2"):
-                    altura = 50 if char == "1" else 100
-                    block_rect = pygame.Rect(
-                        obj_x, floor_y - altura, tile_size, altura
-                    )
-                    blocos_rects.append(block_rect)
+                    spk = pygame.Rect(obj_x + 8, y_pos + 8, TILE_SIZE - 16, TILE_SIZE - 8)
+                    espinhos_chao_rects.append(spk)
+                elif char == "v":
+                    spk = pygame.Rect(obj_x + 8, y_pos, TILE_SIZE - 16, TILE_SIZE - 8)
+                    espinhos_teto_rects.append(spk)
+                elif char == "1":
+                    blk = pygame.Rect(obj_x, y_pos, TILE_SIZE, TILE_SIZE)
+                    blocos_rects.append(blk)
+                elif char == "h":
+                    half_blk = pygame.Rect(obj_x, y_pos + TILE_SIZE // 2, TILE_SIZE, TILE_SIZE // 2)
+                    blocos_rects.append(half_blk)
+                elif char == "~":
+                    lva = pygame.Rect(obj_x, y_pos + TILE_SIZE - 14, TILE_SIZE, 14)
+                    lavas_rects.append(lva)
+                elif char == "*":
+                    pad = pygame.Rect(obj_x + 6, y_pos + TILE_SIZE - 12, TILE_SIZE - 12, 12)
+                    trampolins_rects.append(pad)
+                elif char == "@":
+                    orb = pygame.Rect(obj_x + 8, y_pos + 8, TILE_SIZE - 16, TILE_SIZE - 16)
+                    orbes_rects.append(orb)
                 elif char in ("C", "N", "G"):
-                    portal_rect = pygame.Rect(obj_x, floor_y - 120, 30, 120)
-                    portais.append((portal_rect, char))
-                elif char == "O" and i not in moedas_pegas_ids:
-                    coin_rect = pygame.Rect(obj_x + 18, floor_y - 80, 24, 24)
-                    moedas.append((coin_rect, i))
+                    ptl = pygame.Rect(obj_x + 8, y_pos, TILE_SIZE - 16, TILE_SIZE)
+                    portais.append((ptl, char))
+                elif char == "O" and tile_id not in moedas_pegas_ids:
+                    coin = pygame.Rect(obj_x + 12, y_pos + 12, 36, 36)
+                    moedas.append((coin, tile_id))
 
         slime_hb = slime.get_hitbox()
 
-        if not vitoria:
+        if estado_jogo == "JOGANDO" and not vitoria:
             for portal_rect, tipo in portais:
                 if slime_hb.colliderect(portal_rect):
                     if tipo == "C" and slime.modo != "CHICLETE":
@@ -422,174 +491,183 @@ def main():
                     elif tipo == "G" and slime.modo != "GOSMA":
                         slime.mudar_modo("GOSMA")
 
+            for pad in trampolins_rects:
+                if slime_hb.colliderect(pad):
+                    slime.vel_y = -19.5
+                    slime.is_grounded = False
+                    sound_mgr.tocar(sound_mgr.sfx_pad)
+                    for _ in range(8):
+                        particles.append(Particle(pad.centerx, pad.top, COLOR_PAD))
+
+            for orb in orbes_rects:
+                if slime_hb.colliderect(orb) and space_held and slime.jump_buffer > 0:
+                    slime.vel_y = -16.5
+                    slime.jump_buffer = 0
+                    sound_mgr.tocar(sound_mgr.sfx_jump)
+                    for _ in range(10):
+                        particles.append(Particle(orb.centerx, orb.centery, COLOR_RING))
+
             for coin_rect, coin_id in moedas:
                 if slime_hb.colliderect(coin_rect):
                     moedas_pegas_ids.add(coin_id)
                     moedas_coletadas += 1
                     sound_mgr.tocar(sound_mgr.sfx_coin)
                     for _ in range(8):
-                        particles.append(
-                            Particle(
-                                coin_rect.centerx,
-                                coin_rect.centery,
-                                COLOR_COIN,
-                            )
-                        )
+                        particles.append(Particle(coin_rect.centerx, coin_rect.centery, COLOR_COIN))
 
-            for spike in espinhos_rects:
-                spike_hb = spike.inflate(-18, -14).move(0, 6)
-                if slime_hb.colliderect(spike_hb):
+            for spike in espinhos_chao_rects + espinhos_teto_rects + lavas_rects:
+                if slime_hb.colliderect(spike):
                     reset_game()
 
+            em_cima_de_bloco = False
             for block in blocos_rects:
                 if slime_hb.colliderect(block):
-                    pes_do_slime = slime.rect.bottom
-                    topo_do_slime = slime.rect.top
+                    pes_do_slime = slime.y
 
                     if (
                         slime.gravity > 0
-                        and slime.vel_y >= -3.0
-                        and pes_do_slime <= block.top + 22
+                        and slime.vel_y >= 0
+                        and pes_do_slime <= block.top + 20
                     ):
-                        slime.y = block.top - slime.current_height / 2
-                        slime.vel_y = 0
+                        slime.y = float(block.top)
+                        slime.vel_y = 0.0
                         slime.is_grounded = True
+                        em_cima_de_bloco = True
                         slime.tentar_pular(sound_mgr)
 
                     elif (
                         slime.gravity < 0
-                        and slime.vel_y <= 3.0
-                        and topo_do_slime >= block.bottom - 22
+                        and slime.vel_y <= 0
+                        and slime.rect.top >= block.bottom - 20
                     ):
-                        slime.y = block.bottom + slime.current_height / 2
-                        slime.vel_y = 0
+                        slime.y = float(block.bottom)
+                        slime.vel_y = 0.0
                         slime.is_grounded = True
+                        em_cima_de_bloco = True
                         slime.tentar_pular(sound_mgr)
 
                     else:
                         reset_game()
 
-            if fim_fase_x is not None and slime.x >= fim_fase_x:
-                vitoria = True
-                if id_nivel_atual == len(NIVEIS):
-                    jogo_zerado = True
+            if not em_cima_de_bloco and slime.y < FLOOR_Y:
+                if slime.modo != "CHICLETE":
+                    slime.is_grounded = False
 
+            if slime.x >= fim_fase_x or distancia_percorrida >= distancia_total_musica:
+                vitoria = True
+
+        # RENDERIZAÇÃO DO CENÁRIO
         screen.fill(COLOR_BG)
 
-        pygame.draw.rect(
-            screen,
-            COLOR_FLOOR,
-            (0, floor_y, SCREEN_WIDTH, SCREEN_HEIGHT - floor_y),
-        )
-        pygame.draw.rect(screen, COLOR_FLOOR, (0, 0, SCREEN_WIDTH, ceiling_y))
+        pygame.draw.rect(screen, COLOR_FLOOR, (0, FLOOR_Y, SCREEN_WIDTH, SCREEN_HEIGHT - FLOOR_Y))
+        pygame.draw.rect(screen, COLOR_FLOOR, (0, 0, SCREEN_WIDTH, CEILING_Y))
 
         line_bright = int(120 + beat_pulse * 100)
-        pygame.draw.line(
-            screen,
-            (0, line_bright, int(line_bright * 0.8)),
-            (0, floor_y),
-            (SCREEN_WIDTH, floor_y),
-            3,
-        )
+        pygame.draw.line(screen, (0, line_bright, int(line_bright * 0.8)), (0, FLOOR_Y), (SCREEN_WIDTH, FLOOR_Y), 3)
 
-        for spike in espinhos_rects:
-            pygame.draw.polygon(
-                screen,
-                COLOR_SPIKE,
-                [
-                    spike.bottomleft,
-                    (spike.centerx, spike.top),
-                    spike.bottomright,
-                ],
-            )
+        for spike in espinhos_chao_rects:
+            pygame.draw.polygon(screen, COLOR_SPIKE, [spike.bottomleft, (spike.centerx, spike.top), spike.bottomright])
+
+        for spike_top in espinhos_teto_rects:
+            pygame.draw.polygon(screen, COLOR_SPIKE, [spike_top.topleft, (spike_top.centerx, spike_top.bottom), spike_top.topright])
+
+        for lva in lavas_rects:
+            pygame.draw.rect(screen, COLOR_LAVA, lva)
 
         for block in blocos_rects:
             pygame.draw.rect(screen, COLOR_BLOCK, block)
-            pygame.draw.rect(screen, (120, 110, 150), block, 2)
+            pygame.draw.rect(screen, (150, 140, 180), block, 2)
+
+        for pad in trampolins_rects:
+            pygame.draw.rect(screen, COLOR_PAD, pad, border_radius=3)
+
+        for orb in orbes_rects:
+            pygame.draw.circle(screen, COLOR_RING, orb.center, 14, 3)
+            pygame.draw.circle(screen, (255, 255, 255), orb.center, 6)
 
         for portal_rect, tipo in portais:
-            p_color = (
-                COLOR_SLIME_CHICLETE
-                if tipo == "C"
-                else (COLOR_SLIME_NEVE if tipo == "N" else COLOR_SLIME_GOSMA)
-            )
+            p_color = COLOR_SLIME_CHICLETE if tipo == "C" else (COLOR_SLIME_NEVE if tipo == "N" else COLOR_SLIME_GOSMA)
             pygame.draw.rect(screen, p_color, portal_rect, 4)
 
         for coin_rect, _ in moedas:
-            pygame.draw.circle(screen, COLOR_COIN, coin_rect.center, 12)
+            pygame.draw.circle(screen, COLOR_COIN, coin_rect.center, 14)
             pygame.draw.circle(screen, (255, 255, 200), coin_rect.center, 6)
 
         for p in particles:
             p.draw(screen)
 
-        slime.draw(screen)
+        # RENDERIZA O SLIME
+        if estado_jogo in ("INTRO_RUN", "JOGANDO", "PAUSADO"):
+            slime.draw(screen)
 
-        # UI
-        porcentagem = min(
-            100, int((distancia_percorrida / largura_total_fase) * 100)
-        )
-        if vitoria:
-            porcentagem = 100
+        # RENDERIZA O TEXTO "TENTATIVA X"
+        if estado_jogo in ("INTRO_WAIT", "INTRO_RUN", "JOGANDO", "PAUSADO") and attempt_text_x > -300:
+            txt_attempt = attempt_font.render(f"TENTATIVA {tentativas}", True, (255, 255, 255))
+            screen.blit(txt_attempt, (int(attempt_text_x - txt_attempt.get_width() // 2), 260))
 
-        bar_width = 400
-        bar_height = 16
-        bar_x = (SCREEN_WIDTH - bar_width) // 2
-        bar_y = 20
+        # UI DE BARRA DE PROGRESSO
+        if estado_jogo != "MENU":
+            porcentagem = min(100, int((distancia_percorrida / distancia_total_musica) * 100))
+            if vitoria:
+                porcentagem = 100
 
-        pygame.draw.rect(
-            screen,
-            (50, 40, 70),
-            (bar_x, bar_y, bar_width, bar_height),
-            border_radius=8,
-        )
-        pygame.draw.rect(
-            screen,
-            config_nivel["cor_tema"],
-            (bar_x, bar_y, int(bar_width * (porcentagem / 100)), bar_height),
-            border_radius=8,
-        )
+            bar_width = 320
+            bar_height = 14
+            bar_x = (SCREEN_WIDTH - bar_width) // 2
+            bar_y = 18
 
-        txt_pct = font.render(f"{porcentagem}%", True, (255, 255, 255))
-        screen.blit(txt_pct, (bar_x + bar_width + 15, bar_y - 2))
+            pygame.draw.rect(screen, (50, 40, 70), (bar_x, bar_y, bar_width, bar_height), border_radius=6)
+            pygame.draw.rect(screen, config_nivel["cor_tema"], (bar_x, bar_y, int(bar_width * (porcentagem / 100)), bar_height), border_radius=6)
 
-        txt_nome = font.render(config_nivel["nome"], True, config_nivel["cor_tema"])
-        txt_tentativas = font.render(f"Tentativa: {tentativas}", True, (255, 255, 255))
-        txt_moedas = font.render(f"Moedas: {moedas_coletadas}/3", True, COLOR_COIN)
+            txt_pct = font.render(f"{porcentagem}%", True, (255, 255, 255))
+            screen.blit(txt_pct, (bar_x + bar_width + 12, bar_y - 2))
 
-        screen.blit(txt_nome, (20, 20))
-        screen.blit(txt_tentativas, (20, 50))
-        screen.blit(txt_moedas, (20, 80))
+            txt_nome = font.render(config_nivel["nome"], True, config_nivel["cor_tema"])
+            txt_tentativas = font.render(f"Tentativa: {tentativas}", True, (255, 255, 255))
+            txt_moedas = font.render(f"Moedas: {moedas_coletadas}/3", True, COLOR_COIN)
 
-        if checkpoint is not None:
-            txt_chk = font.render(
-                "[Z] Checkpoint Ativo | [X] Remover",
-                True,
-                COLOR_CHECKPOINT,
-            )
-            screen.blit(txt_chk, (20, 110))
+            screen.blit(txt_nome, (18, 18))
+            screen.blit(txt_tentativas, (18, 40))
+            screen.blit(txt_moedas, (18, 62))
 
-        # Tela de Transição / Vitória de Nível
+            if checkpoint is not None:
+                txt_chk = font.render("[Z] Checkpoint Ativo | [X] Remover", True, COLOR_CHECKPOINT)
+                screen.blit(txt_chk, (18, 84))
+
+        # OVERLAYS DE MENU E PAUSE
+        if estado_jogo == "MENU":
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((10, 8, 20, 230))
+            screen.blit(overlay, (0, 0))
+
+            t1 = title_font.render("SLIME DASH", True, (50, 240, 100))
+            t2 = font.render("Pressione ESPAÇO para Iniciar", True, (255, 255, 255))
+            t3 = font.render("Controles: [ESPAÇO] Pular | [R] Reiniciar | [P / ESC] Pausar", True, (180, 180, 200))
+
+            screen.blit(t1, (SCREEN_WIDTH // 2 - t1.get_width() // 2, 240))
+            screen.blit(t2, (SCREEN_WIDTH // 2 - t2.get_width() // 2, 330))
+            screen.blit(t3, (SCREEN_WIDTH // 2 - t3.get_width() // 2, 390))
+
+        elif estado_jogo == "PAUSADO":
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 180))
+            screen.blit(overlay, (0, 0))
+
+            p1 = title_font.render("JOGO PAUSADO", True, (255, 215, 0))
+            p2 = font.render("[ESPAÇO / P] Continuar  |  [R] Reiniciar  |  [M] Menu", True, (255, 255, 255))
+
+            screen.blit(p1, (SCREEN_WIDTH // 2 - p1.get_width() // 2, 280))
+            screen.blit(p2, (SCREEN_WIDTH // 2 - p2.get_width() // 2, 360))
+
         if vitoria:
             s = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
             s.fill((0, 0, 0, 180))
             screen.blit(s, (0, 0))
 
-            titulo_txt = "JOGO ZERADO!" if jogo_zerado else "FASE CONCLUÍDA!"
-            sub_txt = (
-                "Pressione ESPAÇO para jogar novamente do Nível 1"
-                if jogo_zerado
-                else f"Moedas: {moedas_coletadas}/3  |  Pressione ESPAÇO para a Próxima Fase"
-            )
-
-            txt_vic = title_font.render(titulo_txt, True, config_nivel["cor_tema"])
-            txt_sub = font.render(sub_txt, True, (255, 255, 255))
-
-            screen.blit(
-                txt_vic, (SCREEN_WIDTH // 2 - txt_vic.get_width() // 2, 280)
-            )
-            screen.blit(
-                txt_sub, (SCREEN_WIDTH // 2 - txt_sub.get_width() // 2, 360)
-            )
+            txt_vic = title_font.render("FASE CONCLUÍDA!", True, config_nivel["cor_tema"])
+            txt_sub = font.render(f"Moedas: {moedas_coletadas}/3  |  Pressione ESPAÇO para Avançar", True, (255, 255, 255))
+            screen.blit(txt_vic, (SCREEN_WIDTH // 2 - txt_vic.get_width() // 2, 280))
+            screen.blit(txt_sub, (SCREEN_WIDTH // 2 - txt_sub.get_width() // 2, 350))
 
         pygame.display.flip()
         clock.tick(FPS)
